@@ -522,6 +522,10 @@ open class TaskRunner(
                         // except TaskStatus.canceled is handled directly in cancellation and reset methods
                         BDPlugin.holdingQueue?.taskFinished(task)
                     }
+                    // Hand the foreground service to whichever task asks next. Runs for every
+                    // terminal status, cancellation included, so a cancelled holder cannot strand
+                    // the slot and leave the remaining downloads unprotected.
+                    ForegroundSlot.release(task.taskId)
                 }
             }
         }
@@ -828,8 +832,15 @@ open class TaskRunner(
      */
     fun determineRunInForeground(task: Task, contentLength: Long) {
         val wasRunInForeground = runInForeground
-        runInForeground =
+        val wantsForeground =
             canRunInForeground && contentLength > (runInForegroundFileSize.toLong() shl 20)
+        // Only one task per process can hold the foreground service. Tasks that cannot get it run
+        // as ordinary workers rather than issuing a promotion that fails and takes the worker with
+        // it; see [ForegroundSlot].
+        runInForeground = wantsForeground && ForegroundSlot.claim(task.taskId)
+        if (wantsForeground && !runInForeground) {
+            Log.i(TAG, "TaskId ${task.taskId} runs in background: foreground slot is taken")
+        }
         if (runInForeground) {
             Log.i(TAG, "TaskId ${task.taskId} will run in foreground")
             if (!wasRunInForeground) {
