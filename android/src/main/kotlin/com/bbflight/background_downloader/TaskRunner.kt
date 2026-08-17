@@ -389,6 +389,7 @@ open class TaskRunner(
         get() = context.taskCanResume
         set(value) { context.taskCanResume = value }
     var isResume = false // whether task is a resume
+    private var bytesTotalAtLastCheckpoint = 0L
     private var bytesTotalAtLastProgressUpdate = 0L
     private var lastProgressUpdateTime = 0L // in millis
     private var lastProgressUpdate = 0.0
@@ -526,6 +527,11 @@ open class TaskRunner(
                     // terminal status, cancellation included, so a cancelled holder cannot strand
                     // the slot and leave the remaining downloads unprotected.
                     ForegroundSlot.release(task.taskId)
+                    // A finished or abandoned task has no partial file worth resuming; a failed
+                    // one keeps its checkpoint so the retry can start from it.
+                    if (status == TaskStatus.complete || status == TaskStatus.canceled) {
+                        ResumeCheckpoint.clear(task.taskId, prefs)
+                    }
                 }
             }
         }
@@ -536,6 +542,12 @@ open class TaskRunner(
     open fun determineIfResume(): Boolean {
         return false
     }
+
+    /**
+     * Record a mid-transfer resume point at [bytesSoFar]. Only download tasks, which own a temp
+     * file and an ETag, can offer one; every other task type keeps the no-op.
+     */
+    open fun writeResumeCheckpoint(bytesSoFar: Long, prefs: SharedPreferences) {}
 
     /**
      * Do the task
@@ -704,6 +716,13 @@ open class TaskRunner(
                         if (numBytes > 0) {
                             outputStream.write(dataBuffer, 0, numBytes)
                             bytesTotal += numBytes
+                            // Periodic resume point, so a killed process restarts from here
+                            // instead of from byte 0. See [ResumeCheckpoint].
+                            if (ResumeCheckpoint.isDue(bytesTotal - bytesTotalAtLastCheckpoint)) {
+                                outputStream.flush()
+                                bytesTotalAtLastCheckpoint = bytesTotal
+                                writeResumeCheckpoint(bytesTotal + startByte, prefs)
+                            }
                             val remainingBytes =
                                 BDPlugin.remainingBytesToDownload[task.taskId]
                             if (remainingBytes != null) {

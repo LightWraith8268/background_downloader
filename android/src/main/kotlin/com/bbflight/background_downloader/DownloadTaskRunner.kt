@@ -1,5 +1,6 @@
 package com.bbflight.background_downloader
 
+import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Build
 import android.util.Log
@@ -445,11 +446,35 @@ class DownloadTaskRunner(context: TaskJobContext) : TaskRunner(context) {
      * Return true if this is a resume, and resume is possible,
      * given [tempFilePath] and [requiredStartByte]
      * */
+    override fun writeResumeCheckpoint(bytesSoFar: Long, prefs: SharedPreferences) {
+        // Only worth recording while the server is willing to serve ranges; without that the
+        // checkpoint could never be used.
+        if (!taskCanResume) return
+        ResumeCheckpoint.write(
+            task.taskId,
+            ResumeData(task, resumeDataPath(), bytesSoFar, eTagHeader),
+            prefs
+        )
+    }
+
     override fun determineIfResume(): Boolean {
         // set tempFilePath from resume data, or "" if a new tempFile is needed
         requiredStartByte = context.getInputLong(keyStartByte, 0)
         if (requiredStartByte == 0L) {
-            return false
+            // No resume data in the worker's input: either a first run, or the process was killed
+            // before it could pause. A mid-transfer checkpoint distinguishes the two and saves
+            // re-downloading everything already on disk.
+            val checkpoint = ResumeCheckpoint.take(task.taskId, prefs) ?: return false
+            val startByte = ResumeCheckpoint.startByteFor(
+                checkpoint.requiredStartByte,
+                ResumeCheckpoint.lengthOf(checkpoint.data)
+            )
+            if (startByte == 0L) return false
+            requiredStartByte = startByte
+            tempFilePath = checkpoint.data
+            eTag = checkpoint.eTag
+            Log.i(TAG, "Resuming taskId ${task.taskId} from checkpoint at $startByte bytes")
+            return true
         }
         eTag = context.getInputString(keyETag)
         tempFilePath = if (requiredStartByte > 0) context.getInputString(keyResumeDataData) ?: ""
