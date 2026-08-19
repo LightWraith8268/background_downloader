@@ -583,6 +583,16 @@ open class TaskRunner(
             } as HttpURLConnection) {
                 requestMethod = task.httpRequestMethod
                 connectTimeout = requestTimeoutSeconds * 1000
+                // Without this the read blocks forever: HttpURLConnection defaults
+                // readTimeout to 0, meaning no limit. A transfer can lose its data
+                // without losing its socket — the connection stays ESTABLISHED with
+                // empty queues and nothing arriving — and the task then reports
+                // neither progress nor failure for as long as the peer holds the
+                // socket open. iOS already bounds this through URLSession's
+                // timeoutIntervalForRequest, which is the same idea: the limit is
+                // between packets, so an actively transferring download is never
+                // affected by it.
+                readTimeout = requestTimeoutSeconds * 1000
                 for (header in task.headers) {
                     // For UploadTask, copy headers unless it's "Range" or "Content-Disposition".
                     // For other task types, copy all headers.
