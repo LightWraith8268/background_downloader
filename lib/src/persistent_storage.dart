@@ -532,7 +532,12 @@ class _LocalStorePersistentStorageExecutor {
       case 0:
         // move files from docDir to supportDir
         final docDir = await getApplicationDocumentsDirectory();
-        final supportDir = await getApplicationSupportDirectory();
+        // The override, when the caller set one: asking path_provider here
+        // both answers with the wrong folder and creates it, which leaves an
+        // empty directory in the user profile of a portable app.
+        final supportDir =
+            Localstore.databaseDirectoryOverride ??
+            await getApplicationSupportDirectory();
         await Future.wait(
           [resumeDataPath, pausedTasksPath, taskRecordsPath].map((path) async {
             try {
