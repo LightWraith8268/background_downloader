@@ -8,7 +8,19 @@ part of 'localstore.dart';
 /// final db = Localstore.instance;
 /// ```
 final class Localstore implements LocalstoreImpl {
-  final _databaseDirectory = getApplicationSupportDirectory();
+  /// Directory the database lives in, replacing the application support
+  /// directory when set.
+  ///
+  /// A portable copy of an app keeps everything it writes inside its own
+  /// folder, and path_provider answers with a location in the user profile
+  /// instead. An app can redirect path_provider, but this storage runs on its
+  /// own isolate, where that registration does not apply — so the directory
+  /// has to be handed across explicitly. Set it before the first read.
+  static Directory? databaseDirectoryOverride;
+
+  late final Future<Directory> _databaseDirectory = databaseDirectoryOverride != null
+      ? Future.value(databaseDirectoryOverride!)
+      : getApplicationSupportDirectory();
   final _delegate = DocumentRef._('');
   static final Localstore _localstore = Localstore._();
 

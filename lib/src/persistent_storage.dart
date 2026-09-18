@@ -106,6 +106,17 @@ enum _StorageCommand {
 /// Runs the actual [Localstore] based storage on a background isolate to
 /// prevent jank on the main thread
 class LocalStorePersistentStorage implements PersistentStorage {
+  /// Stores the database in [databaseDirectory] instead of the application
+  /// support directory.
+  ///
+  /// For a portable app, whose files must all stay inside its own folder. The
+  /// path is handed to the storage isolate explicitly, because a path_provider
+  /// override registered by the app does not reach another isolate.
+  LocalStorePersistentStorage({this.databaseDirectory});
+
+  /// Where the database lives, or null for the application support directory.
+  final String? databaseDirectory;
+
   static const taskRecordsPath =
       _LocalStorePersistentStorageExecutor.taskRecordsPath;
   static const resumeDataPath =
@@ -156,7 +167,10 @@ class LocalStorePersistentStorage implements PersistentStorage {
       // pass the RootIsolateToken to allow background isolate to use platform channels
       // for path_provider
       final rootIsolateToken = RootIsolateToken.instance;
-      await _sendRequest(_StorageCommand.initialize, [rootIsolateToken]);
+      await _sendRequest(_StorageCommand.initialize, [
+        rootIsolateToken,
+        databaseDirectory,
+      ]);
     } catch (e) {
       _initializationFuture = null; // allow retry
       rethrow;
@@ -303,8 +317,10 @@ void _isolateEntry(SendPort mainSendPort) {
           if (token != null) {
             BackgroundIsolateBinaryMessenger.ensureInitialized(token);
           }
-          if (token != null) {
-            BackgroundIsolateBinaryMessenger.ensureInitialized(token);
+          // Before the executor, which reads the directory on construction.
+          final directory = args.length > 1 ? args[1] as String? : null;
+          if (directory != null) {
+            Localstore.databaseDirectoryOverride = Directory(directory);
           }
           executor = _LocalStorePersistentStorageExecutor();
           await executor!.initialize();
